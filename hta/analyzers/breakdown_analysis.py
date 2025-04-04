@@ -660,47 +660,71 @@ class BreakdownAnalysis:
                     gpu_kernels["kernel_type"].eq(KernelType.COMPUTATION.name)
                 ].copy()
             )
+
+            comm_kernels = merge_kernel_intervals(
+                gpu_kernels[
+                    gpu_kernels["kernel_type"].eq(KernelType.COMMUNICATION.name)
+                ].copy()
+            )
+
+            mem_kernels = merge_kernel_intervals(
+                gpu_kernels[
+                    gpu_kernels["kernel_type"].eq(KernelType.MEMORY.name)
+                ].copy()
+            )
+                
             compute_time = comp_kernels.end.sum() - comp_kernels.ts.sum()
+            comm_time = comm_kernels.end.sum() - comm_kernels.ts.sum()
+            mem_time = mem_kernels.end.sum() - mem_kernels.ts.sum()
             non_compute_time = kernel_time - compute_time - idle_time
 
             assert idle_time <= kernel_time
             assert compute_time <= kernel_time
             assert non_compute_time >= 0
+            assert comm_time <= kernel_time
+            assert mem_time <= kernel_time
 
-            return idle_time, compute_time, non_compute_time, kernel_time
+            return idle_time, compute_time, comm_time, mem_time, non_compute_time, kernel_time
 
         result: Dict[str, List[float]] = defaultdict(list)
         for rank, trace_df in t.traces.items():
             result["rank"].append(rank)
-            idle_time, compute_time, non_compute_time, kernel_time = idle_time_per_rank(
+            idle_time, compute_time, comm_time, mem_time, non_compute_time, kernel_time = idle_time_per_rank(
                 trace_df
             )
             result["idle_time(us)"].append(idle_time)
             result["compute_time(us)"].append(compute_time)
             result["non_compute_time(us)"].append(non_compute_time)
             result["kernel_time(us)"].append(kernel_time)
+            result["comm_time(us)"].append(comm_time)
+            result["mem_time(us)"].append(mem_time)
 
         result_df = pd.DataFrame(result)
         result_df["idle_time"] = (
             result_df["idle_time(us)"] / result_df["kernel_time(us)"]
         )
         result_df["idle_time_pctg"] = round(100 * result_df["idle_time"], 2)
+
         result_df["compute_time"] = (
             result_df["compute_time(us)"] / result_df["kernel_time(us)"]
         )
         result_df["compute_time_pctg"] = round(100 * result_df["compute_time"], 2)
-        result_df["non_compute_time"] = (
-            result_df["non_compute_time(us)"] / result_df["kernel_time(us)"]
+
+        result_df["comm_time"] = (
+            result_df["comm_time(us)"] / result_df["kernel_time(us)"]
         )
-        result_df["non_compute_time_pctg"] = round(
-            100 * result_df["non_compute_time"], 2
+        result_df["comm_time_pctg"] = round(100 * result_df["comm_time"], 2)
+        
+        result_df["mem_time"] = (
+            result_df["mem_time(us)"] / result_df["kernel_time(us)"]
         )
+        result_df["mem_time_pctg"] = round(100 * result_df["mem_time"], 2)
 
         if visualize:  # pragma: no cover
             fig = px.bar(
                 result_df,
                 x="rank",
-                y=["idle_time", "compute_time", "non_compute_time"],
+                y=["idle_time", "compute_time", "comm_time", "mem_time"],
                 title="Temporal breakdown across ranks",
                 labels={
                     "rank": "Rank",
@@ -718,10 +742,14 @@ class BreakdownAnalysis:
                 "rank",
                 "idle_time(us)",
                 "compute_time(us)",
+                "comm_time(us)",
+                "mem_time(us)",
                 "non_compute_time(us)",
                 "kernel_time(us)",
                 "idle_time_pctg",
                 "compute_time_pctg",
+                "comm_time_pctg",
+                "mem_time_pctg",
                 "non_compute_time_pctg",
             ]
         ]
